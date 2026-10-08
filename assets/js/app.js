@@ -208,7 +208,10 @@
       '<li class="dado">' + icone("telefone", "p") + "<span>" + (temLink(r.telefone) ? '<a href="tel:' + esc(String(r.telefone).replace(/[^\d+]/g, "")) + '">' + esc(r.telefone) + "</a>" : t(r.telefone)) + "</span></li>" +
       '<li class="dado">' + icone("email", "p") + "<span>" + (temLink(r.email) ? '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + "</a>" : t(r.email)) + "</span></li>" +
       "</ul></div></div>" +
-      '<div class="rodape-base"><span>© ' + ano + " " + esc(G.nomeEscola || "") + " · " + esc(G.unidade || "") + "</span>" + (r.creditos ? '<span class="creditos">' + esc(r.creditos) + "</span>" : "") + "</div>" +
+      '<div class="rodape-base"><span>© ' + ano + " " + esc(G.nomeEscola || "") + " · " + esc(G.unidade || "") + "</span>" +
+      // Com senha ativa: link para sair (pede a senha de novo)
+      (senhaAtiva() ? '<a class="sair-conta" href="#" data-sair-senha>Sair</a>' : "") +
+      (r.creditos ? '<span class="creditos">' + esc(r.creditos) + "</span>" : "") + "</div>" +
       "</div></footer>";
   }
 
@@ -1927,7 +1930,104 @@
   }
 
   /* ---------- Início ---------- */
+  /* ---------- Senha do portal (conteudo/geral.js > senhaPortal) ----------
+     Mostra uma tela de senha antes do portal. O site guarda só a "impressão
+     digital" (SHA-256) da senha, nunca a senha em si. Atenção: é uma proteção
+     simples — no GitHub Pages os arquivos continuam públicos para quem souber procurar.
+     No arquivo aberto direto do computador (file://), a senha não é pedida. */
+  var SENHA_CHAVE = "portal_senha_ok";
+  function senhaHash() { return String((G.senhaPortal || {}).hash || "").toLowerCase(); }
+  function senhaAtiva() { return !!senhaHash() && /^https?:$/.test(location.protocol); }
+  function senhaLiberada() {
+    var h = senhaHash();
+    try { if (sessionStorage.getItem(SENHA_CHAVE) === h) return true; } catch (e) {}
+    try {
+      var v = JSON.parse(localStorage.getItem(SENHA_CHAVE) || "null");
+      if (v && v.h === h && v.ate > Date.now()) return true;
+    } catch (e) {}
+    return false;
+  }
+  function sairSenha() {
+    try { sessionStorage.removeItem(SENHA_CHAVE); } catch (e) {}
+    try { localStorage.removeItem(SENHA_CHAVE); } catch (e) {}
+    location.reload();
+  }
+
+  // SHA-256 em JavaScript puro (funciona em qualquer navegador, com ou sem https)
+  function sha256(texto) {
+    var bytes = unescape(encodeURIComponent(texto)), K = [], H = [], i, j;
+    function primo(n) { for (var d = 2; d * d <= n; d++) if (n % d === 0) return false; return true; }
+    function frac(x) { return ((x - Math.floor(x)) * 4294967296) >>> 0; }
+    for (var n = 2, c = 0; c < 64; n++) if (primo(n)) { if (c < 8) H[c] = frac(Math.pow(n, 1 / 2)); K[c++] = frac(Math.pow(n, 1 / 3)); }
+    var l = bytes.length * 8, w = [];
+    bytes += "\x80"; while (bytes.length % 64 !== 56) bytes += "\x00";
+    for (i = 0; i < bytes.length; i++) w[i >> 2] |= bytes.charCodeAt(i) << ((3 - i % 4) * 8);
+    w[w.length] = (l / 4294967296) >>> 0; w[w.length] = l >>> 0;
+    function rot(x, s) { return (x >>> s) | (x << (32 - s)); }
+    for (j = 0; j < w.length; j += 16) {
+      var W = w.slice(j, j + 16), a = H[0], b = H[1], cc = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (i = 0; i < 64; i++) {
+        if (i >= 16) {
+          var s0 = rot(W[i - 15], 7) ^ rot(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+          var s1 = rot(W[i - 2], 17) ^ rot(W[i - 2], 19) ^ (W[i - 2] >>> 10);
+          W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+        }
+        var t1 = (h + (rot(e, 6) ^ rot(e, 11) ^ rot(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + (W[i] | 0)) | 0;
+        var t2 = ((rot(a, 2) ^ rot(a, 13) ^ rot(a, 22)) + ((a & b) ^ (a & cc) ^ (b & cc))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = cc; cc = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + cc) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(function (x) { return ("00000000" + (x >>> 0).toString(16)).slice(-8); }).join("");
+  }
+
+  function telaSenha() {
+    document.title = "Acesso restrito · " + (G.tituloPortal || "Portal do Ensino Médio");
+    document.body.className = "tela-senha-ativa";
+    el("topo").innerHTML = "";
+    el("rodape").innerHTML = "";
+    var dias = Number((G.senhaPortal || {}).lembrarDias) || 30;
+    el("conteudo").innerHTML =
+      '<section class="tela-senha"><form class="senha-cartao" id="form-senha" novalidate>' +
+      (G.logo ? '<img class="senha-logo" src="' + esc(G.logo) + '" alt="Fleming">' : "") +
+      '<span class="senha-rotulo">' + esc(G.tituloPortal || "Portal do Ensino Médio") + " · " + esc(G.unidade || "") + "</span>" +
+      "<h1>Acesso restrito</h1><p>Digite a senha para entrar no portal.</p>" +
+      '<div class="senha-linha"><label class="so-leitor" for="senha-campo">Senha</label>' +
+      '<input id="senha-campo" type="password" autocomplete="current-password" placeholder="Senha" required>' +
+      '<button type="button" class="senha-ver" aria-label="Mostrar senha" aria-pressed="false">' +
+      '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>' +
+      "</button></div>" +
+      '<label class="senha-lembrar"><input type="checkbox" id="senha-lembrar" checked> Lembrar neste aparelho por ' + dias + " dias</label>" +
+      '<button class="botao primario senha-entrar" type="submit">Entrar ' + icone("seta", "p") + "</button>" +
+      '<p class="senha-erro" role="alert" hidden>Senha incorreta. Tente de novo.</p>' +
+      "</form></section>";
+    var form = el("form-senha"), campo = el("senha-campo"), erro = form.querySelector(".senha-erro"), ver = form.querySelector(".senha-ver");
+    campo.focus();
+    ver.addEventListener("click", function () {
+      var mostrar = campo.type === "password";
+      campo.type = mostrar ? "text" : "password";
+      ver.setAttribute("aria-pressed", mostrar ? "true" : "false");
+      ver.setAttribute("aria-label", mostrar ? "Esconder senha" : "Mostrar senha");
+    });
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (sha256(campo.value.trim()) === senhaHash()) {
+        try { sessionStorage.setItem(SENHA_CHAVE, senhaHash()); } catch (e) {}
+        if (el("senha-lembrar").checked) {
+          try { localStorage.setItem(SENHA_CHAVE, JSON.stringify({ h: senhaHash(), ate: Date.now() + dias * 86400000 })); } catch (e) {}
+        }
+        location.reload();
+      } else {
+        erro.hidden = false;
+        form.classList.remove("tremer"); void form.offsetWidth; form.classList.add("tremer");
+        campo.select();
+      }
+    });
+  }
+
   function iniciar() {
+    if (senhaAtiva() && !senhaLiberada()) { telaSenha(); return; }
     var pagina = document.body.getAttribute("data-pagina");
     var ativo = pagina;
     var html = "";
@@ -1962,6 +2062,8 @@
     montarGaleria();
     montarBarraAvisos();
     montarAbasMateriais();
+    var sair = document.querySelector("[data-sair-senha]");
+    if (sair) sair.addEventListener("click", function (e) { e.preventDefault(); sairSenha(); });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciar);

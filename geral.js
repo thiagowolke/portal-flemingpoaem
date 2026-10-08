@@ -39,8 +39,8 @@ CONTEUDO.geral = {
   //         senha, abra o arquivo "TROCAR SENHA.html", digite a senha nova e
   //         cole aqui o código que aparecer. Deixe "" para o portal ficar SEM senha.
   //   lembrarDias: por quantos dias o aparelho fica liberado depois de digitar a senha.
-  senhaPortal: {
-    hash: "e766456b5abc3db16eeacfabb6e0cd05d0569fd1c50e7652d684a968a0d137bf",
+  senhaPortal: {"e766456b5abc3db16eeacfabb6e0cd05d0569fd1c50e7652d684a968a0d137bf"
+    hash: "",
     lembrarDias: 30
   },
 
